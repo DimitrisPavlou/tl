@@ -80,7 +80,41 @@ public:
         }
         return *this;
     }
-   
+    // Rule of Five 
+    // 1. default destructor of std::vector is sufficient 
+    ~Tensor() = default;
+
+    // 2. copy constructor
+    // Performs a deep copy of the data buffer
+    Tensor(const Tensor& other) : data(other.data), shape(other.shape), strides(other.strides) {}
+
+    // 3. Copy Assignment Operator
+    Tensor& operator=(const Tensor& other) {
+        if (this != &other) {
+            data = other.data;
+            shape = other.shape;
+            strides = other.strides;
+        }
+        return *this;
+    }
+    
+    // 4. Move Constructor
+    // "Steals" the data buffer from a temporary tensor (no copy)
+    Tensor(Tensor&& other) noexcept 
+        : data(std::move(other.data)), 
+          shape(std::move(other.shape)), 
+          strides(std::move(other.strides)) {}
+
+    // 5. Move Assignment Operator
+    Tensor& operator=(Tensor&& other) noexcept {
+        if (this != &other) {
+            data = std::move(other.data);
+            shape = std::move(other.shape);
+            strides = std::move(other.strides);
+        }
+        return *this;
+    }
+
 
 private:
     void check_shape(const Tensor& other) const {
