@@ -83,6 +83,3 @@ g++ -std=c++23 main.cpp -o main
 🤝 Contributing
 
 Contributions are welcome! If you're interested in numerical stability, stride optimization, or adding new mathematical solvers, feel free to open a Pull Request.
-
-
-**Would you like me to create the `tl/random.hpp` file now so we can start populating thos
