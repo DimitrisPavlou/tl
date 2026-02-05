@@ -13,20 +13,40 @@ Tensor<T> operator*(T scalar, const Tensor<T>& t) { return t * scalar; }
 template <typename T>
 Tensor<T> operator+(T scalar, const Tensor<T>& t) { return t + scalar; }
 
+
+template <typename T>
+Tensor<T> operator-(T scalar, const Tensor<T>& t) {
+    return t - scalar;
+}
+
+template <typename T>
+Tensor<T> operator/(T scalar, const Tensor<T>& t) {
+    return t / scalar;
+}
+
+
 // --- Factories ---
 template <typename T>
-Tensor<T> zeros(std::vector<std::size_t> shape) { // Changed int to std::size_t
+Tensor<T> zeros(std::vector<std::size_t>& shape) { // Changed int to std::size_t
     Tensor<T> t(shape);
     std::fill(t.data.begin(), t.data.end(), static_cast<T>(0));
     return t;
 }
 
 template <typename T>
-Tensor<T> ones(std::vector<std::size_t> shape) { // Changed int to std::size_t
+Tensor<T> ones(std::vector<std::size_t>& shape) { // Changed int to std::size_t
     Tensor<T> t(shape);
     std::fill(t.data.begin(), t.data.end(), static_cast<T>(1));
     return t;
 }
+
+template <typename T>
+Tensor<T> full(const std::vector<std::size_t>& shape, T value) {
+    Tensor<T> t(shape);
+    std::fill(t.data.begin(), t.data.end(), value);
+    return t;
+}
+
 
 // --- Reshape ---
 template <typename T>
@@ -43,6 +63,91 @@ Tensor<T> reshape(const Tensor<T>& item, std::vector<std::size_t> new_shape) {
     new_tensor.shape = new_shape;
     new_tensor.recalculate_strides();
     return new_tensor;
+}
+
+
+template <typename T>
+T dot(const Tensor<T>& a, const Tensor<T>& b) {
+    if (a.shape.size() != 1 || b.shape.size() != 1) {
+        throw std::runtime_error("dot product requires 1D tensors.");
+    }
+    if (a.shape[0] != b.shape[0]) {
+        throw std::runtime_error("Vectors must be the same length.");
+    }
+
+    T result = static_cast<T>(0);
+    const T* ptr_a = a.data.data();
+    const T* ptr_b = b.data.data();
+    std::size_t n = a.data.size();
+
+    for (std::size_t i = 0; i < n; ++i) {
+        result += ptr_a[i] * ptr_b[i];
+    }
+    return result;
+}
+
+
+template <typename T>
+Tensor<T> transpose(const Tensor<T>& A) {
+    if (A.shape.size() != 2) {
+        throw std::runtime_error("transpose currently supports 2D matrices only.");
+    }
+    
+    const std::size_t rows = A.shape[0];
+    const std::size_t cols = A.shape[1];
+    
+    Tensor<T> result({cols, rows});
+    
+    for (std::size_t i = 0; i < rows; ++i) {
+        for (std::size_t j = 0; j < cols; ++j) {
+            result.data[j * rows + i] = A.data[i * cols + j];
+        }
+    }
+    
+    return result;
+}
+
+
+
+// --- Sum (with optional axis) ---
+template <typename T>
+T sum(const Tensor<T>& t) {
+    T total = static_cast<T>(0);
+    const T* ptr = t.data.data();
+    const std::size_t n = t.data.size();
+    
+    #pragma omp simd reduction(+:total)
+    for (std::size_t i = 0; i < n; ++i) {
+        total += ptr[i];
+    }
+    return total;
+}
+
+// --- Mean ---
+template <typename T>
+float mean(const Tensor<T>& t) {
+    if (t.data.empty()) {
+        throw std::runtime_error("Cannot compute mean of empty tensor");
+    }
+    return static_cast<float>(sum(t)) / static_cast<float>(t.data.size());
+}
+
+// --- Max ---
+template <typename T>
+T max(const Tensor<T>& t) {
+    if (t.data.empty()) {
+        throw std::runtime_error("Cannot compute max of empty tensor");
+    }
+    return *std::max_element(t.data.begin(), t.data.end());
+}
+
+// --- Min ---
+template <typename T>
+T min(const Tensor<T>& t) {
+    if (t.data.empty()) {
+        throw std::runtime_error("Cannot compute min of empty tensor");
+    }
+    return *std::min_element(t.data.begin(), t.data.end());
 }
 
 template <typename T>
@@ -119,4 +224,4 @@ void print(const Tensor<T>& tensor) {
     std::cout << std::endl;
 }
 
-} // namespace tl
+} // namespace tl 

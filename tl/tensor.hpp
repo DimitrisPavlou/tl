@@ -14,10 +14,29 @@ public:
     std::vector<std::size_t> shape;
     std::vector<std::size_t> strides;
 
-    Tensor(std::vector<std::size_t> s) : shape(s) {
+    Tensor(std::vector<std::size_t> s) : shape(std::move(s)) {
         std::size_t total_size = 1;
         for (auto dim : shape) total_size *= dim;
         data.resize(total_size);
+        recalculate_strides();
+    }
+
+    // NumPy-style 2D nested init: Tensor t({{1,2}, {3,4}});
+    Tensor(std::initializer_list<std::initializer_list<T>> list) {
+        std::size_t rows = list.size();
+        std::size_t cols = (rows > 0) ? list.begin()->size() : 0;
+        shape = {rows, cols};
+        data.reserve(rows * cols);
+        for (auto& row : list) {
+            if (row.size() != cols) throw std::runtime_error("Inconsistent row lengths");
+            data.insert(data.end(), row.begin(), row.end());
+        }
+        recalculate_strides();
+    }
+
+    // Flat data + Shape: Tensor t({2,2}, {1,2,3,4});
+    Tensor(std::vector<std::size_t> s, std::initializer_list<T> d) 
+        : data(d), shape(std::move(s)) {
         recalculate_strides();
     }
 
@@ -154,6 +173,39 @@ public:
         return res;
     }
 
+    Tensor operator-(T scalar) const {
+        // 1. Allocate without zero-filling the memory
+        Tensor res(shape); 
+        
+        // 2. Extract raw pointers to help the compiler vectorize
+        T* r = res.data.data();
+        const T* a = this->data.data();
+        std::size_t n = data.size();
+
+        // 3. Simple loop that the compiler can easily turn into AVX instructions
+        for (std::size_t i = 0; i < n; ++i) {
+            r[i] = a[i] - scalar;
+        }
+        return res;
+    }
+
+
+    Tensor operator/(T scalar) const {
+        // 1. Allocate without zero-filling the memory
+        Tensor res(shape); 
+        
+        // 2. Extract raw pointers to help the compiler vectorize
+        T* r = res.data.data();
+        const T* a = this->data.data();
+        std::size_t n = data.size();
+
+        // 3. Simple loop that the compiler can easily turn into AVX instructions
+        for (std::size_t i = 0; i < n; ++i) {
+            r[i] = a[i] / scalar;
+        }
+        return res;
+    }
+
     // in-place addition for efficiency
     Tensor& operator+=(const Tensor& other) {
         check_shape(other);
@@ -172,6 +224,70 @@ public:
         std::size_t n = data.size();
         
         for (std::size_t i = 0; i < n; ++i) a[i] -= b[i];
+        return *this;
+    }
+
+    Tensor& operator*=(const Tensor& other) {
+        check_shape(other);
+        T* a = this->data.data();
+        const T* b = other.data.data();
+        std::size_t n = data.size();
+        
+        for (std::size_t i = 0; i < n; ++i) a[i] *= b[i];
+        return *this;
+    }
+
+    Tensor& operator/=(const Tensor& other) {
+        check_shape(other);
+        T* a = this->data.data();
+        const T* b = other.data.data();
+        std::size_t n = data.size();
+        
+        for (std::size_t i = 0; i < n; ++i) a[i] /= b[i];
+        return *this;
+    }
+    
+    Tensor& operator+=(T scalar) {
+        T* a = this->data.data();
+        const std::size_t n = data.size();
+        
+        #pragma omp simd
+        for (std::size_t i = 0; i < n; ++i) {
+            a[i] += scalar;
+        }
+        return *this;
+    }
+
+    Tensor& operator-=(T scalar) {
+        T* a = this->data.data();
+        const std::size_t n = data.size();
+        
+        #pragma omp simd
+        for (std::size_t i = 0; i < n; ++i) {
+            a[i] -= scalar;
+        }
+        return *this;
+    }
+
+    Tensor& operator*=(T scalar) {
+        T* a = this->data.data();
+        const std::size_t n = data.size();
+        
+        #pragma omp simd
+        for (std::size_t i = 0; i < n; ++i) {
+            a[i] *= scalar;
+        }
+        return *this;
+    }
+
+    Tensor& operator/=(T scalar) {
+        T* a = this->data.data();
+        const std::size_t n = data.size();
+        
+        #pragma omp simd
+        for (std::size_t i = 0; i < n; ++i) {
+            a[i] /= scalar;
+        }
         return *this;
     }
 
@@ -220,5 +336,4 @@ private:
         if (shape != other.shape) throw std::runtime_error("Shape mismatch");
     }
 };
-
-} // namespace tl
+} // namespace tl 

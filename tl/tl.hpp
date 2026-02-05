@@ -9,3 +9,5 @@
 
 // 3. Utils comes last (depends on Tensor and View)
 #include "tensor_utils.hpp"
+
+#include "linalg_utils.hpp"
