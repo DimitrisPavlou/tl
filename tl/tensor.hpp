@@ -114,7 +114,7 @@ public:
 
     Tensor operator*(const Tensor& other) const {
         check_shape(other);
-        Tensor res(shape); // Still has zero-init overhead
+        Tensor res(shape); 
         T* res_ptr = res.data.data();
         const T* a_ptr = this->data.data();
         const T* b_ptr = other.data.data();
@@ -145,12 +145,10 @@ public:
     //element-wise with scalar
     Tensor operator+(T scalar) const {
         Tensor res(shape);         
-        // 2. Extract raw pointers to help the compiler vectorize
         T* r = res.data.data();
         const T* a = this->data.data();
         std::size_t n = data.size();
 
-        // 3. Simple loop that the compiler can easily turn into AVX instructions
         for (std::size_t i = 0; i < n; ++i) {
             r[i] = a[i] + scalar;
         }
@@ -158,15 +156,12 @@ public:
     }
 
     Tensor operator*(T scalar) const {
-        // 1. Allocate without zero-filling the memory
         Tensor res(shape); 
         
-        // 2. Extract raw pointers to help the compiler vectorize
         T* r = res.data.data();
         const T* a = this->data.data();
         std::size_t n = data.size();
 
-        // 3. Simple loop that the compiler can easily turn into AVX instructions
         for (std::size_t i = 0; i < n; ++i) {
             r[i] = a[i] * scalar;
         }
@@ -337,3 +332,5 @@ private:
     }
 };
 } // namespace tl 
+
+ // namespace tl
