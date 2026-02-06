@@ -1,6 +1,6 @@
 #pragma once 
 
-#include "tensor.hpp"
+#include "../tensor_core/tensor.hpp"
 #include <cmath>
 #include <cstddef>
 #include <string>
