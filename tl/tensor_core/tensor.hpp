@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <numeric>
 #include "view.hpp"
+#include "broadcasting.hpp"
 
 namespace tl {
 
@@ -86,50 +87,24 @@ public:
         return View<const T>{ const_cast<T*>(&data[i * strides[0]]), &shape[1], &strides[1], shape.size() - 1 };
     }
 
-    // --- Element-wise tensor operators ---
+    // --- Element-wise tensor operators (with broadcasting) ---
+    // Fast path: identical shapes → direct loop, no overhead.
+    // Broadcast path: different shapes → stride-based multi-dimensional loop.
 
     Tensor operator+(const Tensor& other) const {
-        check_shape(other);
-        Tensor res(shape);
-        T* res_ptr = res.data.data();
-        const T* a_ptr = this->data.data();
-        const T* b_ptr = other.data.data();
-        const std::size_t n = data.size();
-        for (std::size_t i = 0; i < n; ++i) res_ptr[i] = a_ptr[i] + b_ptr[i];
-        return res;
+        return broadcast_apply(other, [](T a, T b){ return a + b; });
     }
 
     Tensor operator-(const Tensor& other) const {
-        check_shape(other);
-        Tensor res(shape);
-        T* res_ptr = res.data.data();
-        const T* a_ptr = this->data.data();
-        const T* b_ptr = other.data.data();
-        const std::size_t n = data.size();
-        for (std::size_t i = 0; i < n; ++i) res_ptr[i] = a_ptr[i] - b_ptr[i];
-        return res;
+        return broadcast_apply(other, [](T a, T b){ return a - b; });
     }
 
     Tensor operator*(const Tensor& other) const {
-        check_shape(other);
-        Tensor res(shape);
-        T* res_ptr = res.data.data();
-        const T* a_ptr = this->data.data();
-        const T* b_ptr = other.data.data();
-        const std::size_t n = data.size();
-        for (std::size_t i = 0; i < n; ++i) res_ptr[i] = a_ptr[i] * b_ptr[i];
-        return res;
+        return broadcast_apply(other, [](T a, T b){ return a * b; });
     }
 
     Tensor operator/(const Tensor& other) const {
-        check_shape(other);
-        Tensor res(shape);
-        T* res_ptr = res.data.data();
-        const T* a_ptr = this->data.data();
-        const T* b_ptr = other.data.data();
-        const std::size_t n = data.size();
-        for (std::size_t i = 0; i < n; ++i) res_ptr[i] = a_ptr[i] / b_ptr[i];
-        return res;
+        return broadcast_apply(other, [](T a, T b){ return a / b; });
     }
 
     // --- Element-wise scalar operators ---
@@ -283,6 +258,49 @@ public:
 private:
     void check_shape(const Tensor& other) const {
         if (shape != other.shape) throw std::runtime_error("Shape mismatch");
+    }
+
+    // Core broadcasting engine.
+    // Op is a binary functor (T, T) -> T.
+    template <typename Op>
+    Tensor broadcast_apply(const Tensor& other, Op op) const {
+        // Fast path: identical shapes — original direct loop, zero overhead.
+        if (shape == other.shape) {
+            Tensor res(shape);
+            T* r = res.data.data();
+            const T* a = data.data();
+            const T* b = other.data.data();
+            const std::size_t n = data.size();
+            for (std::size_t i = 0; i < n; ++i) r[i] = op(a[i], b[i]);
+            return res;
+        }
+
+        // Broadcast path: compute output shape and per-tensor broadcasted strides.
+        std::vector<std::size_t> out_shape = compute_broadcast_shape(shape, other.shape);
+        std::vector<std::size_t> str_a = get_broadcast_strides(shape, strides, out_shape);
+        std::vector<std::size_t> str_b = get_broadcast_strides(other.shape, other.strides, out_shape);
+
+        Tensor res(out_shape);
+        const std::size_t rank = out_shape.size();
+
+        // Compute total output elements
+        std::size_t total = 1;
+        for (auto d : out_shape) total *= d;
+
+        for (std::size_t flat = 0; flat < total; ++flat) {
+            // Convert flat index to multi-dimensional coordinates, then
+            // compute the linear offset into each input using its (possibly 0) strides.
+            std::size_t off_a = 0, off_b = 0;
+            std::size_t remaining = flat;
+            for (std::size_t d = rank; d-- > 0; ) {
+                std::size_t coord = remaining % out_shape[d];
+                remaining /= out_shape[d];
+                off_a += coord * str_a[d];
+                off_b += coord * str_b[d];
+            }
+            res.data[flat] = op(data[off_a], other.data[off_b]);
+        }
+        return res;
     }
 };
 

@@ -18,6 +18,7 @@ void run_linalg_tests          (tl::TestContext& ctx);
 void run_functional_tests      (tl::TestContext& ctx);
 void run_dot_product_tests     (tl::TestContext& ctx);
 void run_elementary_tests      (tl::TestContext& ctx);
+void run_broadcasting_tests    (tl::TestContext& ctx);
 
 // ── Include test translation units ───────────────────────────────────────────
 // (Each file defines the function declared above.)
@@ -26,6 +27,7 @@ void run_elementary_tests      (tl::TestContext& ctx);
 #include "test_functional.cpp"
 #include "test_dot_product.cpp"
 #include "test_elementary_functions.cpp"
+#include "test_broadcasting.cpp"
 
 
 // ── Runner ────────────────────────────────────────────────────────────────────
@@ -45,6 +47,7 @@ int main() {
     run_functional_tests(ctx);
     run_dot_product_tests(ctx);
     run_elementary_tests(ctx);
+    run_broadcasting_tests(ctx);
 
     return ctx.summary();   // exits 0 if all pass, 1 if any failed
 }
