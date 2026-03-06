@@ -4,166 +4,178 @@
 #include <cmath>
 #include <algorithm>
 
+// Note: #pragma omp simd requires compiling with -fopenmp (GCC/Clang) or /openmp (MSVC).
+// Without that flag the pragma is silently ignored; all loops remain correct.
+
 namespace tl {
 namespace functional {
 
-    // Helper: Maps Tensor<T> to Tensor<float>, applying a unary operation in the process.
-    // This handles the transition from possible integer data to floating point results for cases like sqrt(int) -> float. 
-    // Should higher accuracy be needed (e.g., double), we can template the output type as well, or statically cast to double. 
-    // For now we assume float32 is sufficient for these operations.
-
-    template <typename T, typename Op>
-    Tensor<float> apply_unary_float(const Tensor<T>& t, Op op) {
-        Tensor<float> res(t.shape);
+    // apply_unary: applies a unary op element-wise, preserving the input type T.
+    // FIX: The output type Tout is now a separate template parameter so that:
+    //   - apply_unary<double>(t, std::exp) returns Tensor<double> (no precision loss)
+    //   - apply_unary<float>(t, std::exp)  returns Tensor<float>
+    // Callers that want integer->float promotion can explicitly pass Tout=float.
+    template <typename Tout, typename T, typename Op>
+    Tensor<Tout> apply_unary(const Tensor<T>& t, Op op) {
+        Tensor<Tout> res(t.shape);
         const T* src = t.data.data();
-        float* dst = res.data.data();
-        std::size_t n = t.data.size();
+        Tout* dst = res.data.data();
+        const std::size_t n = t.data.size();
 
-        // Using SIMD for the conversion/operation loop where possible
         #pragma omp simd
         for (std::size_t i = 0; i < n; ++i) {
-            dst[i] = op(static_cast<float>(src[i]));
+            dst[i] = op(static_cast<Tout>(src[i]));
         }
         return res;
     }
 
-    // --- Elementary Functions (Returning Float) ---
-    // Used Lambda functions to avoid code duplication.
+    // Helper: deduce output type.
+    // For floating-point T: output is T (preserves float or double).
+    // For integral T: output is float (sensible default for math functions on ints).
+    template <typename T>
+    using math_result_t = std::conditional_t<std::is_floating_point_v<T>, T, float>;
 
+    // Convenience wrapper that applies the type promotion rule above.
+    template <typename T, typename Op>
+    Tensor<math_result_t<T>> apply_unary_math(const Tensor<T>& t, Op op) {
+        return apply_unary<math_result_t<T>>(t, op);
+    }
+
+
+    // --- Elementary Functions ---
 
     template <typename T>
-    Tensor<float> abs(const Tensor<T>& t) {
-        return apply_unary_float(t, [](float v) { return std::abs(v); });
+    Tensor<math_result_t<T>> abs(const Tensor<T>& t) {
+        return apply_unary_math(t, [](math_result_t<T> v) { return std::abs(v); });
     }
 
     template <typename T>
-    Tensor<float> exp(const Tensor<T>& t) {
-        return apply_unary_float(t, [](float v) { return std::exp(v); });
+    Tensor<math_result_t<T>> exp(const Tensor<T>& t) {
+        return apply_unary_math(t, [](math_result_t<T> v) { return std::exp(v); });
     }
 
     template <typename T>
-    Tensor<float> log(const Tensor<T>& t) {
-        return apply_unary_float(t, [](float v) { return std::log(v); });
+    Tensor<math_result_t<T>> log(const Tensor<T>& t) {
+        return apply_unary_math(t, [](math_result_t<T> v) { return std::log(v); });
     }
 
     template <typename T>
-    Tensor<float> sqrt(const Tensor<T>& t) {
-        return apply_unary_float(t, [](float v) { return std::sqrt(v); });
+    Tensor<math_result_t<T>> sqrt(const Tensor<T>& t) {
+        return apply_unary_math(t, [](math_result_t<T> v) { return std::sqrt(v); });
     }
+
 
     // --- Trigonometric & Hyperbolic Functions ---
 
     template <typename T>
-    Tensor<float> sin(const Tensor<T>& t) {
-        return apply_unary_float(t, [](float v) { return std::sin(v); });
+    Tensor<math_result_t<T>> sin(const Tensor<T>& t) {
+        return apply_unary_math(t, [](math_result_t<T> v) { return std::sin(v); });
     }
 
     template <typename T>
-    Tensor<float> cos(const Tensor<T>& t) {
-        return apply_unary_float(t, [](float v) { return std::cos(v); });
+    Tensor<math_result_t<T>> cos(const Tensor<T>& t) {
+        return apply_unary_math(t, [](math_result_t<T> v) { return std::cos(v); });
     }
 
     template <typename T>
-    Tensor<float> tan(const Tensor<T>& t) {
-        return apply_unary_float(t, [](float v) { return std::tan(v); });
+    Tensor<math_result_t<T>> tan(const Tensor<T>& t) {
+        return apply_unary_math(t, [](math_result_t<T> v) { return std::tan(v); });
     }
 
     template <typename T>
-    Tensor<float> sinh(const Tensor<T>& t) {
-        return apply_unary_float(t, [](float v) { return std::sinh(v); });
+    Tensor<math_result_t<T>> sinh(const Tensor<T>& t) {
+        return apply_unary_math(t, [](math_result_t<T> v) { return std::sinh(v); });
     }
 
     template <typename T>
-    Tensor<float> cosh(const Tensor<T>& t) {
-        return apply_unary_float(t, [](float v) { return std::cosh(v); });
+    Tensor<math_result_t<T>> cosh(const Tensor<T>& t) {
+        return apply_unary_math(t, [](math_result_t<T> v) { return std::cosh(v); });
     }
 
     template <typename T>
-    Tensor<float> tanh(const Tensor<T>& t) {
-        return apply_unary_float(t, [](float v) { return std::tanh(v); });
+    Tensor<math_result_t<T>> tanh(const Tensor<T>& t) {
+        return apply_unary_math(t, [](math_result_t<T> v) { return std::tanh(v); });
     }
+
 
     // --- Inverse Hyperbolic Functions ---
+    // acosh is only defined for x >= 1; atanh for |x| < 1.
 
     template <typename T>
-    Tensor<float> asinh(const Tensor<T>& t) {
-        return apply_unary_float(t, [](float v) { return std::asinh(v); });
+    Tensor<math_result_t<T>> asinh(const Tensor<T>& t) {
+        return apply_unary_math(t, [](math_result_t<T> v) { return std::asinh(v); });
     }
 
     template <typename T>
-    Tensor<float> acosh(const Tensor<T>& t) {
-        return apply_unary_float(t, [](float v) { 
-            // acosh is only defined for x >= 1
-            return std::acosh(v); 
-        });
+    Tensor<math_result_t<T>> acosh(const Tensor<T>& t) {
+        return apply_unary_math(t, [](math_result_t<T> v) { return std::acosh(v); });
     }
 
     template <typename T>
-    Tensor<float> atanh(const Tensor<T>& t) {
-        return apply_unary_float(t, [](float v) { 
-            // atanh is only defined for |x| < 1
-            return std::atanh(v); 
-        });
+    Tensor<math_result_t<T>> atanh(const Tensor<T>& t) {
+        return apply_unary_math(t, [](math_result_t<T> v) { return std::atanh(v); });
     }
+
 
     // --- Additional Numerical Functions ---
 
     template <typename T>
-    Tensor<float> ceil(const Tensor<T>& t) {
-        return apply_unary_float(t, [](float v) { return std::ceil(v); });
+    Tensor<math_result_t<T>> ceil(const Tensor<T>& t) {
+        return apply_unary_math(t, [](math_result_t<T> v) { return std::ceil(v); });
     }
 
     template <typename T>
-    Tensor<float> floor(const Tensor<T>& t) {
-        return apply_unary_float(t, [](float v) { return std::floor(v); });
+    Tensor<math_result_t<T>> floor(const Tensor<T>& t) {
+        return apply_unary_math(t, [](math_result_t<T> v) { return std::floor(v); });
     }
 
     template <typename T>
-    Tensor<float> round(const Tensor<T>& t) {
-        return apply_unary_float(t, [](float v) { return std::round(v); });
+    Tensor<math_result_t<T>> round(const Tensor<T>& t) {
+        return apply_unary_math(t, [](math_result_t<T> v) { return std::round(v); });
     }
+
 
     // --- Power and Square Root ---
 
     template <typename T>
-    Tensor<float> square(const Tensor<T>& t) {
-        return apply_unary_float(t, [](float v) { return v * v; });
+    Tensor<math_result_t<T>> square(const Tensor<T>& t) {
+        return apply_unary_math(t, [](math_result_t<T> v) { return v * v; });
     }
 
-    // Element-wise power: result = base^p
+    // Element-wise power: result[i] = t[i]^p
     template <typename T>
-    Tensor<float> power(const Tensor<T>& t, float p) {
-        return apply_unary_float(t, [p](float v) { return std::pow(v, p); });
+    Tensor<math_result_t<T>> power(const Tensor<T>& t, math_result_t<T> p) {
+        return apply_unary_math(t, [p](math_result_t<T> v) { return std::pow(v, p); });
     }
+
 
     // --- Activation Functions ---
 
     template <typename T>
-    Tensor<float> relu(const Tensor<T>& t) {
-        return apply_unary_float(t, [](float v) { 
-            return (v > 0.0f) ? v : 0.0f; 
-        });
+    Tensor<math_result_t<T>> relu(const Tensor<T>& t) {
+        using R = math_result_t<T>;
+        return apply_unary_math(t, [](R v) { return (v > R{0}) ? v : R{0}; });
     }
 
     template <typename T>
-    Tensor<float> leaky_relu(const Tensor<T>& t, float alpha = 0.01f) {
-        return apply_unary_float(t, [alpha](float v) { 
-            return (v > 0.0f) ? v : alpha * v; 
-        });
+    Tensor<math_result_t<T>> leaky_relu(const Tensor<T>& t, math_result_t<T> alpha = 0.01f) {
+        using R = math_result_t<T>;
+        return apply_unary_math(t, [alpha](R v) { return (v > R{0}) ? v : alpha * v; });
     }
 
     template <typename T>
-    Tensor<float> sigmoid(const Tensor<T>& t) {
-        return apply_unary_float(t, [](float v) { 
-            return 1.0f / (1.0f + std::exp(-v)); 
-        });
+    Tensor<math_result_t<T>> sigmoid(const Tensor<T>& t) {
+        using R = math_result_t<T>;
+        return apply_unary_math(t, [](R v) { return R{1} / (R{1} + std::exp(-v)); });
     }
 
-    // --- Comparison/Clamping ---
+
+    // --- Clamping ---
 
     template <typename T>
-    Tensor<float> clip(const Tensor<T>& t, float min_val, float max_val) {
-        return apply_unary_float(t, [min_val, max_val](float v) {
+    Tensor<math_result_t<T>> clip(const Tensor<T>& t, math_result_t<T> min_val, math_result_t<T> max_val) {
+        using R = math_result_t<T>;
+        return apply_unary_math(t, [min_val, max_val](R v) {
             return std::max(min_val, std::min(max_val, v));
         });
     }
