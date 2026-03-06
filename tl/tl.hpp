@@ -7,7 +7,10 @@
 // 2. Tensor comes second (depends on View)
 #include "tensor_core/tensor.hpp"
 
-// 3. Utils comes last (depends on Tensor and View)
+// 3. Broadcasting utilities (depends on Tensor)
+#include "tensor_core/broadcasting.hpp"
+
+// 4. Utils comes last (depends on Tensor and View)
 #include "tensor_core/tensor_utils.hpp"
 
 #include "linalg/linalg_utils.hpp"
