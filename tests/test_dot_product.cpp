@@ -28,6 +28,8 @@ void test_dot_product_fix() {
 }
 
 int main() {
+
+    std::cout<<"This was done on the new_tests branch"<<std::endl;
     std::cout << "======================================" << std::endl;
     std::cout << "   Tensor Library - Tests & Demos    " << std::endl;
     std::cout << "======================================\n" << std::endl;
