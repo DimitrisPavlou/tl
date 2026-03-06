@@ -3,6 +3,7 @@
 #include <vector>
 #include <stdexcept>
 #include <algorithm>
+#include <numeric>
 #include "view.hpp"
 
 namespace tl {
@@ -10,10 +11,13 @@ namespace tl {
 template <typename T>
 class Tensor {
 public:
+    using value_type = T;   // enables decltype(tensor)::value_type in tests and generic code
+
     std::vector<T> data;
     std::vector<std::size_t> shape;
     std::vector<std::size_t> strides;
 
+    // Shape-only constructor: allocates zero-initialized data.
     Tensor(std::vector<std::size_t> s) : shape(std::move(s)) {
         std::size_t total_size = 1;
         for (auto dim : shape) total_size *= dim;
@@ -34,9 +38,17 @@ public:
         recalculate_strides();
     }
 
-    // Flat data + Shape: Tensor t({2,2}, {1,2,3,4});
-    Tensor(std::vector<std::size_t> s, std::initializer_list<T> d) 
+    // Flat data + shape constructor: Tensor t({2,2}, {1,2,3,4});
+    // FIX: validates that the number of data elements matches the shape.
+    Tensor(std::vector<std::size_t> s, std::initializer_list<T> d)
         : data(d), shape(std::move(s)) {
+        std::size_t expected = 1;
+        for (auto dim : shape) expected *= dim;
+        if (data.size() != expected) {
+            throw std::runtime_error(
+                "Shape/data mismatch: shape implies " + std::to_string(expected) +
+                " elements, but " + std::to_string(data.size()) + " were provided.");
+        }
         recalculate_strides();
     }
 
@@ -49,165 +61,122 @@ public:
         }
     }
 
-    // Indexing
+    // Indexing with bounds checking (FIX: throws for 0D tensors and out-of-range)
     View<T> operator[](std::size_t i) {
+        if (shape.empty()) {
+            throw std::out_of_range("Cannot index a 0-dimensional tensor (scalar)");
+        }
+        if (i >= shape[0]) {
+            throw std::out_of_range(
+                "Index " + std::to_string(i) +
+                " out of range for dimension of size " + std::to_string(shape[0]));
+        }
         return View<T>{ &data[i * strides[0]], &shape[1], &strides[1], shape.size() - 1 };
     }
 
     const View<const T> operator[](std::size_t i) const {
+        if (shape.empty()) {
+            throw std::out_of_range("Cannot index a 0-dimensional tensor (scalar)");
+        }
+        if (i >= shape[0]) {
+            throw std::out_of_range(
+                "Index " + std::to_string(i) +
+                " out of range for dimension of size " + std::to_string(shape[0]));
+        }
         return View<const T>{ const_cast<T*>(&data[i * strides[0]]), &shape[1], &strides[1], shape.size() - 1 };
     }
 
+    // --- Element-wise tensor operators ---
 
-    // element wise math Operators
-    //Tensor operator+(const Tensor& other) const { check_shape(other); Tensor res(shape); 
-    //    for(size_t i=0; i<data.size(); ++i) res.data[i] = data[i] + other.data[i]; return res; }
-    
-    //Tensor operator-(const Tensor& other) const { check_shape(other); Tensor res(shape); 
-    //    for(size_t i=0; i<data.size(); ++i) res.data[i] = data[i] - other.data[i]; return res; }
-    
-    //Tensor operator*(const Tensor& other) const { check_shape(other); Tensor res(shape); 
-    //    for(size_t i=0; i<data.size(); ++i) res.data[i] = data[i] * other.data[i]; return res; }
-
-    //Tensor operator/(const Tensor& other) const { check_shape(other); Tensor res(shape); 
-    //    for(size_t i=0; i<data.size(); ++i) res.data[i] = data[i] / other.data[i]; return res; }
-    
-    //element-wise with scalar
-    //Tensor operator*(T scalar) const { Tensor res(shape); 
-    //    for(size_t i=0; i<data.size(); ++i) res.data[i] = data[i] * scalar; return res; }
-
-    //Tensor operator+(T scalar) const { Tensor res(shape); 
-    //    for(size_t i=0; i<data.size(); ++i) res.data[i] = data[i] + scalar; return res; }
-
-
-    //faster implementation of element-wise addition using raw pointers and potential for vectorization
     Tensor operator+(const Tensor& other) const {
         check_shape(other);
-        Tensor res(shape); // Still has zero-init overhead
+        Tensor res(shape);
         T* res_ptr = res.data.data();
         const T* a_ptr = this->data.data();
         const T* b_ptr = other.data.data();
-        std::size_t n = data.size();
-
-        //#pragma omp parallel for
-        for (std::size_t i = 0; i < n; ++i) {
-            res_ptr[i] = a_ptr[i] + b_ptr[i];
-        }
+        const std::size_t n = data.size();
+        for (std::size_t i = 0; i < n; ++i) res_ptr[i] = a_ptr[i] + b_ptr[i];
         return res;
     }
 
     Tensor operator-(const Tensor& other) const {
         check_shape(other);
-        Tensor res(shape); // Still has zero-init overhead
+        Tensor res(shape);
         T* res_ptr = res.data.data();
         const T* a_ptr = this->data.data();
         const T* b_ptr = other.data.data();
-        std::size_t n = data.size();
-
-        //#pragma omp parallel for
-        for (size_t i = 0; i < n; ++i) {
-            res_ptr[i] = a_ptr[i] - b_ptr[i];
-        }
+        const std::size_t n = data.size();
+        for (std::size_t i = 0; i < n; ++i) res_ptr[i] = a_ptr[i] - b_ptr[i];
         return res;
     }
 
-
     Tensor operator*(const Tensor& other) const {
         check_shape(other);
-        Tensor res(shape); 
+        Tensor res(shape);
         T* res_ptr = res.data.data();
         const T* a_ptr = this->data.data();
         const T* b_ptr = other.data.data();
-        std::size_t n = data.size();
-
-        //#pragma omp parallel for
-        for (std::size_t i = 0; i < n; ++i) {
-            res_ptr[i] = a_ptr[i] * b_ptr[i];
-        }
+        const std::size_t n = data.size();
+        for (std::size_t i = 0; i < n; ++i) res_ptr[i] = a_ptr[i] * b_ptr[i];
         return res;
     }
 
     Tensor operator/(const Tensor& other) const {
         check_shape(other);
-        Tensor res(shape); // Still has zero-init overhead
+        Tensor res(shape);
         T* res_ptr = res.data.data();
         const T* a_ptr = this->data.data();
         const T* b_ptr = other.data.data();
-        std::size_t n = data.size();
-
-        //#pragma omp parallel for
-        for (std::size_t i = 0; i < n; ++i) {
-            res_ptr[i] = a_ptr[i] / b_ptr[i];
-        }
+        const std::size_t n = data.size();
+        for (std::size_t i = 0; i < n; ++i) res_ptr[i] = a_ptr[i] / b_ptr[i];
         return res;
     }
-    
-    //element-wise with scalar
+
+    // --- Element-wise scalar operators ---
+
     Tensor operator+(T scalar) const {
-        Tensor res(shape);         
+        Tensor res(shape);
         T* r = res.data.data();
         const T* a = this->data.data();
-        std::size_t n = data.size();
-
-        for (std::size_t i = 0; i < n; ++i) {
-            r[i] = a[i] + scalar;
-        }
+        const std::size_t n = data.size();
+        for (std::size_t i = 0; i < n; ++i) r[i] = a[i] + scalar;
         return res;
     }
 
     Tensor operator*(T scalar) const {
-        Tensor res(shape); 
-        
+        Tensor res(shape);
         T* r = res.data.data();
         const T* a = this->data.data();
-        std::size_t n = data.size();
-
-        for (std::size_t i = 0; i < n; ++i) {
-            r[i] = a[i] * scalar;
-        }
+        const std::size_t n = data.size();
+        for (std::size_t i = 0; i < n; ++i) r[i] = a[i] * scalar;
         return res;
     }
 
     Tensor operator-(T scalar) const {
-        // 1. Allocate without zero-filling the memory
-        Tensor res(shape); 
-        
-        // 2. Extract raw pointers to help the compiler vectorize
+        Tensor res(shape);
         T* r = res.data.data();
         const T* a = this->data.data();
-        std::size_t n = data.size();
-
-        // 3. Simple loop that the compiler can easily turn into AVX instructions
-        for (std::size_t i = 0; i < n; ++i) {
-            r[i] = a[i] - scalar;
-        }
+        const std::size_t n = data.size();
+        for (std::size_t i = 0; i < n; ++i) r[i] = a[i] - scalar;
         return res;
     }
-
 
     Tensor operator/(T scalar) const {
-        // 1. Allocate without zero-filling the memory
-        Tensor res(shape); 
-        
-        // 2. Extract raw pointers to help the compiler vectorize
+        Tensor res(shape);
         T* r = res.data.data();
         const T* a = this->data.data();
-        std::size_t n = data.size();
-
-        // 3. Simple loop that the compiler can easily turn into AVX instructions
-        for (std::size_t i = 0; i < n; ++i) {
-            r[i] = a[i] / scalar;
-        }
+        const std::size_t n = data.size();
+        for (std::size_t i = 0; i < n; ++i) r[i] = a[i] / scalar;
         return res;
     }
 
-    // in-place addition for efficiency
+    // --- In-place tensor operators ---
+
     Tensor& operator+=(const Tensor& other) {
         check_shape(other);
         T* a = this->data.data();
         const T* b = other.data.data();
-        std::size_t n = data.size();
-        //#pragma omp parallel for
+        const std::size_t n = data.size();
         for (std::size_t i = 0; i < n; ++i) a[i] += b[i];
         return *this;
     }
@@ -216,8 +185,7 @@ public:
         check_shape(other);
         T* a = this->data.data();
         const T* b = other.data.data();
-        std::size_t n = data.size();
-        
+        const std::size_t n = data.size();
         for (std::size_t i = 0; i < n; ++i) a[i] -= b[i];
         return *this;
     }
@@ -226,8 +194,7 @@ public:
         check_shape(other);
         T* a = this->data.data();
         const T* b = other.data.data();
-        std::size_t n = data.size();
-        
+        const std::size_t n = data.size();
         for (std::size_t i = 0; i < n; ++i) a[i] *= b[i];
         return *this;
     }
@@ -236,58 +203,48 @@ public:
         check_shape(other);
         T* a = this->data.data();
         const T* b = other.data.data();
-        std::size_t n = data.size();
-        
+        const std::size_t n = data.size();
         for (std::size_t i = 0; i < n; ++i) a[i] /= b[i];
         return *this;
     }
-    
+
+    // --- In-place scalar operators ---
+    // Note: #pragma omp simd requires compiling with -fopenmp (GCC/Clang) or /openmp (MSVC).
+    // Without that flag the pragma is silently ignored; the loops are still correct.
+
     Tensor& operator+=(T scalar) {
         T* a = this->data.data();
         const std::size_t n = data.size();
-        
         #pragma omp simd
-        for (std::size_t i = 0; i < n; ++i) {
-            a[i] += scalar;
-        }
+        for (std::size_t i = 0; i < n; ++i) a[i] += scalar;
         return *this;
     }
 
     Tensor& operator-=(T scalar) {
         T* a = this->data.data();
         const std::size_t n = data.size();
-        
         #pragma omp simd
-        for (std::size_t i = 0; i < n; ++i) {
-            a[i] -= scalar;
-        }
+        for (std::size_t i = 0; i < n; ++i) a[i] -= scalar;
         return *this;
     }
 
     Tensor& operator*=(T scalar) {
         T* a = this->data.data();
         const std::size_t n = data.size();
-        
         #pragma omp simd
-        for (std::size_t i = 0; i < n; ++i) {
-            a[i] *= scalar;
-        }
+        for (std::size_t i = 0; i < n; ++i) a[i] *= scalar;
         return *this;
     }
 
     Tensor& operator/=(T scalar) {
         T* a = this->data.data();
         const std::size_t n = data.size();
-        
         #pragma omp simd
-        for (std::size_t i = 0; i < n; ++i) {
-            a[i] /= scalar;
-        }
+        for (std::size_t i = 0; i < n; ++i) a[i] /= scalar;
         return *this;
     }
 
-
-    // Rule of Five 
+    // --- Rule of Five ---
     ~Tensor() = default;
     Tensor(const Tensor& other) : data(other.data), shape(other.shape), strides(other.strides) {}
     Tensor& operator=(const Tensor& other) {
@@ -298,7 +255,7 @@ public:
         }
         return *this;
     }
-    Tensor(Tensor&& other) noexcept 
+    Tensor(Tensor&& other) noexcept
         : data(std::move(other.data)), shape(std::move(other.shape)), strides(std::move(other.strides)) {}
 
     Tensor& operator=(Tensor&& other) noexcept {
@@ -310,27 +267,23 @@ public:
         return *this;
     }
 
-    // This allows Tensor to be assigned to a View: tensor[i] = other_tensor
+    // Implicit conversion to View (used by linalg and print utilities)
     operator View<T>() {
-        return View<T>{ data.data(), shape, strides, (int)shape.size() };
+        return View<T>{ data.data(), shape.data(), strides.data(), shape.size() };
     }
 
-    // Explicitly get a view if needed
     View<T> view() {
         return static_cast<View<T>>(*this);
     }
 
-    // Also provide a const version
     operator View<const T>() const {
-        return View<const T>{ const_cast<T*>(data.data()), shape, strides, (int)shape.size() };
+        return View<const T>{ const_cast<T*>(data.data()), shape.data(), strides.data(), shape.size() };
     }
 
-    
 private:
     void check_shape(const Tensor& other) const {
         if (shape != other.shape) throw std::runtime_error("Shape mismatch");
     }
 };
-} // namespace tl 
 
- // namespace tl
+} // namespace tl
