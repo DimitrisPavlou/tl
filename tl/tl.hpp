@@ -13,6 +13,21 @@
 // 4. Utils comes last (depends on Tensor and View)
 #include "tensor_core/tensor_utils.hpp"
 
+// 5. Random factories, slicing (depend on Tensor)
+#include "tensor_core/random.hpp"
+#include "tensor_core/slicing.hpp"
+
 #include "linalg/linalg_utils.hpp"
 
 #include "functional/functions.hpp"
+
+// 6. Axis-wise reductions + fused element-wise map (depend on Tensor)
+#include "functional/reductions.hpp"
+#include "functional/map.hpp"
+
+// 7. Reverse-mode autograd (depends on Tensor, linalg, functional)
+#include "autograd/autograd.hpp"
+
+// 8. ODE integrators + heap-free SmallTensor (standalone)
+#include "ode/small_tensor.hpp"
+#include "ode/rk4.hpp"

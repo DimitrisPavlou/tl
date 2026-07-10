@@ -9,38 +9,71 @@
 namespace tl {
 namespace linalg {
 
-    // Matrix multiplication (optimized version)
+    // Single 2D GEMM kernel: C[M,N] += A[M,K] * B[K,N], contiguous row-major.
+    // Cache-friendly i-k-j order with a vectorizable inner loop. C must be zeroed.
     template <typename T>
-    Tensor<T> matmul(const Tensor<T>& A, const Tensor<T>& B) {
-        if (A.shape.size() != 2 || B.shape.size() != 2) {
-            throw std::runtime_error("matmul currently supports 2D matrices only.");
-        }
-        if (A.shape[1] != B.shape[0]) {
-            throw std::runtime_error("Inner dimensions must match for matmul.");
-        }
-        
-        const std::size_t M = A.shape[0];
-        const std::size_t K = A.shape[1];
-        const std::size_t N = B.shape[1];
-        
-        Tensor<T> C({M, N});
-        std::fill(C.data.begin(), C.data.end(), static_cast<T>(0));
-
-        // Optimized i-k-j order for cache efficiency
+    inline void gemm_kernel(const T* A, const T* B, T* C,
+                            std::size_t M, std::size_t K, std::size_t N) {
+        // Rows are independent → parallelise over i (active only with -fopenmp).
+        #pragma omp parallel for schedule(static)
         for (std::size_t i = 0; i < M; ++i) {
             for (std::size_t k = 0; k < K; ++k) {
-                const T a_ik = A.data[i * K + k];
-                T* c_row = &C.data[i * N];
-                const T* b_row = &B.data[k * N];
-                
-                // Vectorizable inner loop
+                const T a_ik = A[i * K + k];
+                T* c_row = &C[i * N];
+                const T* b_row = &B[k * N];
                 #pragma omp simd
                 for (std::size_t j = 0; j < N; ++j) {
                     c_row[j] += a_ik * b_row[j];
                 }
             }
         }
-        return C;
+    }
+
+    // Matrix multiplication.
+    // Supported shapes:
+    //   * 2D @ 2D          : [M,K] @ [K,N]        -> [M,N]
+    //   * 3D @ 2D          : [Bt,M,K] @ [K,N]     -> [Bt,M,N]   (shared weight)
+    //   * 3D @ 3D          : [Bt,M,K] @ [Bt,K,N]  -> [Bt,M,N]   (batched)
+    template <typename T>
+    Tensor<T> matmul(const Tensor<T>& A, const Tensor<T>& B) {
+        const std::size_t ra = A.shape.size();
+        const std::size_t rb = B.shape.size();
+
+        // ── Plain 2D case ────────────────────────────────────────────────────
+        if (ra == 2 && rb == 2) {
+            if (A.shape[1] != B.shape[0])
+                throw std::runtime_error("Inner dimensions must match for matmul.");
+            const std::size_t M = A.shape[0], K = A.shape[1], N = B.shape[1];
+            Tensor<T> C({M, N});
+            std::fill(C.data.begin(), C.data.end(), static_cast<T>(0));
+            gemm_kernel<T>(A.data.data(), B.data.data(), C.data.data(), M, K, N);
+            return C;
+        }
+
+        // ── Batched cases (A is 3D) ──────────────────────────────────────────
+        if (ra == 3 && (rb == 2 || rb == 3)) {
+            const std::size_t Bt = A.shape[0], M = A.shape[1], K = A.shape[2];
+            const std::size_t Kb = (rb == 2) ? B.shape[0] : B.shape[1];
+            const std::size_t N  = (rb == 2) ? B.shape[1] : B.shape[2];
+            if (K != Kb)
+                throw std::runtime_error("Inner dimensions must match for matmul.");
+            if (rb == 3 && B.shape[0] != Bt)
+                throw std::runtime_error("Batch dimensions must match for batched matmul.");
+
+            Tensor<T> C({Bt, M, N});
+            std::fill(C.data.begin(), C.data.end(), static_cast<T>(0));
+            const std::size_t a_stride = M * K;
+            const std::size_t b_stride = (rb == 3) ? K * N : 0;   // 0 → shared weight
+            const std::size_t c_stride = M * N;
+            for (std::size_t b = 0; b < Bt; ++b) {
+                gemm_kernel<T>(A.data.data() + b * a_stride,
+                               B.data.data() + b * b_stride,
+                               C.data.data() + b * c_stride, M, K, N);
+            }
+            return C;
+        }
+
+        throw std::runtime_error("matmul supports 2D@2D, 3D@2D, or 3D@3D shapes only.");
     }
 
     // Matrix norm (optimized)

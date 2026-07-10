@@ -4,19 +4,24 @@
 #include <stdexcept>
 #include <algorithm>
 #include <numeric>
+#include "concepts.hpp"
+#include "shared_vec.hpp"
 #include "view.hpp"
 #include "broadcasting.hpp"
 
 namespace tl {
 
-template <typename T>
+template <Numeric T>
 class Tensor {
 public:
     using value_type = T;   // enables decltype(tensor)::value_type in tests and generic code
 
-    std::vector<T> data;
-    std::vector<std::size_t> shape;
-    std::vector<std::size_t> strides;
+    // Storage lives behind shared control blocks (see SharedVec) so that Views
+    // handed out by operator[] / view() can keep the buffers alive. These behave
+    // exactly like std::vector at every call site.
+    SharedVec<T> data;
+    SharedVec<std::size_t> shape;
+    SharedVec<std::size_t> strides;
 
     // Shape-only constructor: allocates zero-initialized data.
     Tensor(std::vector<std::size_t> s) : shape(std::move(s)) {
@@ -72,7 +77,8 @@ public:
                 "Index " + std::to_string(i) +
                 " out of range for dimension of size " + std::to_string(shape[0]));
         }
-        return View<T>{ &data[i * strides[0]], &shape[1], &strides[1], shape.size() - 1 };
+        return View<T>{ &data[i * strides[0]], &shape[1], &strides[1], shape.size() - 1,
+                        data.share(), shape.share(), strides.share() };
     }
 
     const View<const T> operator[](std::size_t i) const {
@@ -84,7 +90,8 @@ public:
                 "Index " + std::to_string(i) +
                 " out of range for dimension of size " + std::to_string(shape[0]));
         }
-        return View<const T>{ const_cast<T*>(&data[i * strides[0]]), &shape[1], &strides[1], shape.size() - 1 };
+        return View<const T>{ const_cast<T*>(&data[i * strides[0]]), &shape[1], &strides[1], shape.size() - 1,
+                              data.share(), shape.share(), strides.share() };
     }
 
     // --- Element-wise tensor operators (with broadcasting) ---
@@ -244,15 +251,21 @@ public:
 
     // Implicit conversion to View (used by linalg and print utilities)
     operator View<T>() {
-        return View<T>{ data.data(), shape.data(), strides.data(), shape.size() };
+        return View<T>{ data.data(), shape.data(), strides.data(), shape.size(),
+                        data.share(), shape.share(), strides.share() };
     }
 
     View<T> view() {
         return static_cast<View<T>>(*this);
     }
 
+    // Explicit independent deep copy (data/shape/strides all duplicated).
+    // Equivalent to copy-construction; provided for self-documenting call sites.
+    Tensor clone() const { return *this; }
+
     operator View<const T>() const {
-        return View<const T>{ const_cast<T*>(data.data()), shape.data(), strides.data(), shape.size() };
+        return View<const T>{ const_cast<T*>(data.data()), shape.data(), strides.data(), shape.size(),
+                              data.share(), shape.share(), strides.share() };
     }
 
 private:
@@ -287,18 +300,25 @@ private:
         std::size_t total = 1;
         for (auto d : out_shape) total *= d;
 
+        // Odometer walk: instead of recomputing coordinates (O(rank) divisions)
+        // for every element, maintain the input offsets incrementally. Advancing
+        // to the next element usually just bumps the innermost dimension, so this
+        // is amortised O(1) per element instead of O(rank).
+        std::vector<std::size_t> coord(rank, 0);
+        std::size_t off_a = 0, off_b = 0;
         for (std::size_t flat = 0; flat < total; ++flat) {
-            // Convert flat index to multi-dimensional coordinates, then
-            // compute the linear offset into each input using its (possibly 0) strides.
-            std::size_t off_a = 0, off_b = 0;
-            std::size_t remaining = flat;
-            for (std::size_t d = rank; d-- > 0; ) {
-                std::size_t coord = remaining % out_shape[d];
-                remaining /= out_shape[d];
-                off_a += coord * str_a[d];
-                off_b += coord * str_b[d];
-            }
             res.data[flat] = op(data[off_a], other.data[off_b]);
+            for (std::size_t d = rank; d-- > 0; ) {
+                if (++coord[d] < out_shape[d]) {
+                    off_a += str_a[d];
+                    off_b += str_b[d];
+                    break;
+                }
+                // Dimension d wrapped: rewind its contribution and carry left.
+                coord[d] = 0;
+                off_a -= str_a[d] * (out_shape[d] - 1);
+                off_b -= str_b[d] * (out_shape[d] - 1);
+            }
         }
         return res;
     }
